@@ -2,29 +2,24 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"sync"
 )
 
-var mutex = &sync.Mutex{}
+var (
+	mutex = &sync.Mutex{}
+	file  = "runs.json"
+)
 
 func main() {
-	if _, err := os.Stat("runs.json"); os.IsNotExist(err) {
-		initialData := make(map[string]int)
-		initialDataBytes, _ := json.Marshal(initialData)
-		err := ioutil.WriteFile("runs.json", initialDataBytes, 0644)
-		if err != nil {
-			fmt.Println("Error creating data.json:", err)
-			return
+	if _, err := os.Stat(file); os.IsNotExist(err) {
+		if err := os.WriteFile(file, []byte("{}"), 0644); err != nil {
+			panic(err)
 		}
 	}
 	http.HandleFunc("/runs", handleRuns)
-	port := "7867"
-	fmt.Println("Server listening on port", port)
-	http.ListenAndServe(":"+port, nil)
+	panic(http.ListenAndServe(":7867", nil))
 }
 
 func handleRuns(w http.ResponseWriter, r *http.Request) {
@@ -35,38 +30,14 @@ func handleRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	mutex.Lock()
 	defer mutex.Unlock()
-	file, err := ioutil.ReadFile("runs.json")
-	if err != nil && !os.IsNotExist(err) {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
 	data := make(map[string]int)
-	if err := json.Unmarshal(file, &data); err != nil && !os.IsNotExist(err) {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+	if content, err := os.ReadFile(file); err == nil {
+		json.Unmarshal(content, &data) // Ignore unmarshal errors for empty/invalid JSON
 	}
-	if val, ok := data[name]; ok {
-		data[name] = val + 1
-	} else {
-		data[name] = 1
-	}
-	file, err = json.MarshalIndent(data, "", "\t")
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	err = ioutil.WriteFile("runs.json", file, 0644)
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	response := map[string]int{"runs": data[name]}
-	jsonResponse, err := json.Marshal(response)
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+	data[name]++
+	if content, err := json.MarshalIndent(data, "", "\t"); err == nil {
+		os.WriteFile(file, content, 0644)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write(jsonResponse)
+	json.NewEncoder(w).Encode(map[string]int{"runs": data[name]})
 }
